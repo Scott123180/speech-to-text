@@ -12,10 +12,14 @@ VALID_MODELS = frozenset(
 DEFAULT_MODEL = "base"
 APP_NAME = "speech-to-text"
 
+VALID_SCALES = [1.0, 1.25, 1.5, 1.75, 2.0]
+DEFAULT_SCALE = 1.0
+
 
 @dataclass
 class Settings:
     model_id: str = DEFAULT_MODEL
+    ui_scale: float = DEFAULT_SCALE
 
 
 class SettingsStore:
@@ -35,7 +39,10 @@ class SettingsStore:
             model_id = data.get("model_id", DEFAULT_MODEL)
             if model_id not in VALID_MODELS:
                 model_id = DEFAULT_MODEL
-            return Settings(model_id=model_id)
+            ui_scale = data.get("ui_scale", DEFAULT_SCALE)
+            if ui_scale not in VALID_SCALES:
+                ui_scale = DEFAULT_SCALE
+            return Settings(model_id=model_id, ui_scale=ui_scale)
         except (json.JSONDecodeError, KeyError, OSError):
             return Settings()
 

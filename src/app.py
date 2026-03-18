@@ -51,6 +51,9 @@ def main() -> None:
     settings_store = SettingsStore()
     settings = settings_store.load()
 
+    ctk.set_widget_scaling(settings.ui_scale)
+    ctk.set_window_scaling(settings.ui_scale)
+
     recorder = AudioRecorder()
     engine = TranscriptionEngine(settings.model_id)
 
