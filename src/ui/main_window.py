@@ -20,6 +20,7 @@ METER_BARS = 12
 FRAME_MS = 33
 PULSE_SECONDS = 1.4
 SLIDE_SECONDS = 1.1
+NOTICE_SECONDS = 8
 
 STATUS_LABELS = {
     AppState.RECORDING: "Listening",
@@ -36,8 +37,11 @@ class MainWindow(ctk.CTk):
         engine: TranscriptionEngine,
         settings_store: SettingsStore,
     ) -> None:
-        super().__init__(fg_color=BG)
+        # The class name is what GNOME matches against StartupWMClass in
+        # speech-to-text.desktop to show the right icon in the app switcher.
+        super().__init__(fg_color=BG, className="speech-to-text")
         theme.match_font_dpi(self)
+        theme.set_window_icon(self)
         self._recorder = recorder
         self._engine = engine
         self._settings_store = settings_store
@@ -46,6 +50,8 @@ class MainWindow(ctk.CTk):
         self._smoother = LevelSmoother()
         self._state_started = 0.0
         self._animating = False
+        self._cleared_text: str | None = None
+        self._notice_timer: str | None = None
 
         self.title("Speech to Text")
         self.geometry("640x520")
@@ -59,7 +65,15 @@ class MainWindow(ctk.CTk):
 
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        # Clear lives up here, by the text it destroys and far from Copy.
+        topbar = ctk.CTkFrame(self, fg_color="transparent", height=30)
+        topbar.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 0))
+        topbar.pack_propagate(False)
+        self._clear_btn = Pill(
+            topbar, "Clear", self._on_clear, variant="link", danger=True
+        )
 
         # The writing surface fills the window, borderless, like waypoint's box.
         self._output = ctk.CTkTextbox(
@@ -78,7 +92,7 @@ class MainWindow(ctk.CTk):
             spacing2=4,
             spacing3=2,
         )
-        self._output.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(4, 0))
+        self._output.grid(row=1, column=0, sticky="nsew", padx=(4, 0))
 
         self._placeholder = ctk.CTkLabel(
             self._output,
@@ -88,21 +102,43 @@ class MainWindow(ctk.CTk):
             font=theme.font(),
         )
         self._placeholder.bind("<Button-1>", lambda _e: self._output.focus_set())
-        self._output.bind("<KeyRelease>", lambda _e: self._sync_placeholder())
+        self._output.bind("<KeyRelease>", lambda _e: self._sync_text_state())
 
         self._build_footer()
         self._build_notice()
-        self._sync_placeholder()
+        self._sync_text_state()
 
     def _build_footer(self) -> None:
         footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.grid(row=1, column=0, sticky="ew", padx=18, pady=(8, 12))
+        footer.grid(row=2, column=0, sticky="ew", padx=18, pady=(8, 12))
 
-        # Left slot: a quiet hint when idle, the live status otherwise.
-        self._hint_label = ctk.CTkLabel(
-            footer, text="", text_color=MUTED, font=theme.font(theme.SMALL_SIZE)
+        # Left slot: what's doing the transcribing (and where to change it) when
+        # idle, the live status otherwise.
+        self._info = ctk.CTkFrame(footer, fg_color="transparent")
+        self._info.pack(side="left")
+        small = theme.font(theme.SMALL_SIZE)
+        self._model_label = ctk.CTkLabel(
+            self._info, text="Model", text_color=MUTED, font=small
         )
-        self._hint_label.pack(side="left")
+        self._model_value = ctk.CTkLabel(self._info, text="", text_color=FG, font=small)
+        separator = ctk.CTkLabel(self._info, text="·", text_color=MUTED, font=small)
+        self._device_label = ctk.CTkLabel(
+            self._info, text="Device", text_color=MUTED, font=small
+        )
+        self._device_value = ctk.CTkLabel(
+            self._info, text="", text_color=FG, font=small
+        )
+        for widget, gap in (
+            (self._model_label, 5),
+            (self._model_value, 8),
+            (separator, 8),
+            (self._device_label, 5),
+            (self._device_value, 10),
+        ):
+            widget.pack(side="left", padx=(0, gap))
+        Pill(self._info, "Settings", self._on_settings, variant="link").pack(
+            side="left"
+        )
 
         self._status = ctk.CTkFrame(footer, fg_color="transparent")
         scale = ctk.ScalingTracker.get_widget_scaling(self)
@@ -135,25 +171,13 @@ class MainWindow(ctk.CTk):
             highlightthickness=0,
         )
 
-        # Right slot: actions, quietest first, the primary pill last.
-        actions = ctk.CTkFrame(footer, fg_color="transparent")
-        actions.pack(side="right")
-
-        # Secondary actions hide while busy, leaving the slot to the status.
-        self._secondary = ctk.CTkFrame(actions, fg_color="transparent")
-        self._secondary.pack(side="left", padx=(0, 10))
-        for text, command in (
-            ("Copy", self._on_copy),
-            ("Clear", self._on_clear),
-            ("Settings", self._on_settings),
-        ):
-            Pill(self._secondary, text, command, variant="link").pack(
-                side="left", padx=(0, 2)
-            )
-
-        primary = ctk.CTkFrame(actions, fg_color="transparent")
-        primary.pack(side="left")
-        self._primary = primary
+        # Right slot: Copy, then the primary action. Pairs share a height so the
+        # row reads as one control group.
+        primary = ctk.CTkFrame(footer, fg_color="transparent")
+        primary.pack(side="right")
+        self._copy_btn = Pill(
+            primary, "Copy", self._on_copy, large=True, width_text="Copied"
+        )
         self._record_btn = Pill(primary, "Record", self._on_record, variant="filled")
         self._discard_btn = Pill(primary, "Discard", self._on_discard, large=True)
         self._accept_btn = Pill(
@@ -169,7 +193,6 @@ class MainWindow(ctk.CTk):
         self._notice_label = ctk.CTkLabel(
             self._notice,
             text="",
-            text_color=ERROR,
             font=theme.font(13),
             anchor="w",
             justify="left",
@@ -179,17 +202,41 @@ class MainWindow(ctk.CTk):
             "<Configure>",
             lambda e: self._notice_label.configure(wraplength=max(e.width - 8, 100)),
         )
-        Pill(self._notice, "Dismiss", self._clear_notice, accent=True).grid(
-            row=1, column=1, padx=(0, 18), pady=8
-        )
+        self._notice_actions = ctk.CTkFrame(self._notice, fg_color="transparent")
+        self._notice_actions.grid(row=1, column=1, padx=(0, 18), pady=8)
 
     # ── Notice ───────────────────────────────────────────────────────────────
 
-    def _show_notice(self, message: str) -> None:
-        self._notice_label.configure(text=message)
-        self._notice.grid(row=2, column=0, sticky="ew")
+    def _show_notice(
+        self, message: str, error: bool = True, action: tuple | None = None
+    ) -> None:
+        """Show *message* under the footer.
+
+        Errors stay until dismissed. Info notices (e.g. "cleared — undo?") carry
+        an *action* of (label, command) and fade on their own.
+        """
+        self._clear_notice()
+        self._notice_label.configure(text=message, text_color=ERROR if error else FG)
+        for child in self._notice_actions.winfo_children():
+            child.destroy()
+        if action:
+            label, command = action
+            Pill(self._notice_actions, label, command).pack(side="left", padx=(0, 6))
+        Pill(
+            self._notice_actions,
+            "Dismiss",
+            self._clear_notice,
+            variant="outline" if error else "link",
+            accent=error,
+        ).pack(side="left")
+        self._notice.grid(row=3, column=0, sticky="ew")
+        if not error:
+            self._notice_timer = self.after(NOTICE_SECONDS * 1000, self._clear_notice)
 
     def _clear_notice(self) -> None:
+        if self._notice_timer is not None:
+            self.after_cancel(self._notice_timer)
+            self._notice_timer = None
         self._notice.grid_remove()
 
     # ── State machine ────────────────────────────────────────────────────────
@@ -200,20 +247,21 @@ class MainWindow(ctk.CTk):
 
         for btn in (self._record_btn, self._discard_btn, self._accept_btn):
             btn.pack_forget()
+        self._copy_btn.pack_forget()
         if state == AppState.IDLE:
+            self._copy_btn.pack(side="left", padx=(0, 8))
             self._record_btn.pack(side="left")
         elif state == AppState.RECORDING:
-            self._discard_btn.pack(side="left", padx=(0, 6))
+            self._discard_btn.pack(side="left", padx=(0, 8))
             self._accept_btn.pack(side="left")
+        self._sync_text_state()
         if state == AppState.IDLE:
-            self._secondary.pack(side="left", padx=(0, 10), before=self._primary)
             self._status.pack_forget()
-            self._hint_label.pack(side="left")
+            self._info.pack(side="left")
             self._refresh_device_label()
             return
 
-        self._secondary.pack_forget()
-        self._hint_label.pack_forget()
+        self._info.pack_forget()
         self._status.pack(side="left")
         recording = state == AppState.RECORDING
         self._status_label.configure(
@@ -329,10 +377,33 @@ class MainWindow(ctk.CTk):
         text = self._output.get("1.0", "end-1c")
         self.clipboard_clear()
         self.clipboard_append(text)
+        if text:
+            self._copy_btn.configure(text="Copied")
+            self.after(1500, lambda: self._copy_btn.configure(text="Copy"))
 
     def _on_clear(self) -> None:
+        text = self._output.get("1.0", "end-1c")
         self._output.delete("1.0", "end")
-        self._sync_placeholder()
+        self._sync_text_state()
+        if text:
+            self._cleared_text = text
+            self._show_notice(
+                "Transcript cleared.",
+                error=False,
+                action=("Undo", self._on_undo_clear),
+            )
+
+    def _on_undo_clear(self) -> None:
+        if self._cleared_text is None:
+            return
+        # Anything typed since the clear stays, after the restored text.
+        if self._output.get("1.0", "end-1c"):
+            self._output.insert("1.0", self._cleared_text + "\n")
+        else:
+            self._output.insert("1.0", self._cleared_text)
+        self._cleared_text = None
+        self._clear_notice()
+        self._sync_text_state()
 
     def _on_settings(self) -> None:
         from src.ui.settings_window import SettingsWindow
@@ -343,7 +414,7 @@ class MainWindow(ctk.CTk):
         # Reload engine if model changed
         new_model = self._settings_store.load().model_id
         if new_model != self._engine.model_id:
-            self._hint_label.configure(text="Loading model…")
+            self._model_value.configure(text=f"{new_model} (loading…)")
             self.update_idletasks()
             self._engine = TranscriptionEngine(new_model)
             self._apply_state(AppState.IDLE)
@@ -380,13 +451,20 @@ class MainWindow(ctk.CTk):
 
     def _refresh_device_label(self) -> None:
         device_text = "GPU (CUDA)" if self._engine.device == "cuda" else "CPU"
-        self._hint_label.configure(text=f"{self._engine.model_id} · {device_text}")
+        self._model_value.configure(text=self._engine.model_id)
+        self._device_value.configure(text=device_text)
 
-    def _sync_placeholder(self) -> None:
-        if self._output.get("1.0", "end-1c"):
+    def _sync_text_state(self) -> None:
+        """Placeholder when empty; Clear only when there's text and we're idle."""
+        has_text = bool(self._output.get("1.0", "end-1c"))
+        if has_text:
             self._placeholder.place_forget()
         else:
             self._placeholder.place(x=11, y=6)
+        if has_text and self._state == AppState.IDLE:
+            self._clear_btn.pack(side="right")
+        else:
+            self._clear_btn.pack_forget()
 
     def _append_text(self, text: str) -> None:
         if not text:
@@ -396,4 +474,4 @@ class MainWindow(ctk.CTk):
             self._output.insert("end", "\n" + text)
         else:
             self._output.insert("end", text)
-        self._sync_placeholder()
+        self._sync_text_state()

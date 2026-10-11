@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Speech to Text: a voice waveform (red, the recording accent) becoming
+       lines of text (grey), on waypoint's dark surface. -->
+  <rect x="8" y="8" width="240" height="240" rx="56" ry="56" fill="#1e1e1e"/>
+  <rect x="9.5" y="9.5" width="237" height="237" rx="54.5" ry="54.5" fill="none" stroke="#3a3a3a" stroke-width="3"/>
+  <!-- waveform -->
+  <rect x="44"  y="110" width="16" height="36"  rx="8" ry="8" fill="#ff8a8a"/>
+  <rect x="70"  y="76"  width="16" height="104" rx="8" ry="8" fill="#ff8a8a"/>
+  <rect x="96"  y="96"  width="16" height="64"  rx="8" ry="8" fill="#ff8a8a"/>
+  <!-- text lines -->
+  <rect x="132" y="84"  width="80" height="16" rx="8" ry="8" fill="#f2f2f2"/>
+  <rect x="132" y="120" width="64" height="16" rx="8" ry="8" fill="#f2f2f2"/>
+  <rect x="132" y="156" width="72" height="16" rx="8" ry="8" fill="#9a9a9a"/>
+</svg>

@@ -8,8 +8,10 @@ else is greyscale.
 import re
 import subprocess
 import sys
+import tkinter as tk
 import tkinter.font
 from functools import cache
+from pathlib import Path
 
 import customtkinter as ctk
 
@@ -25,6 +27,9 @@ ERROR_HOVER = ("#871f24", "#ffb4b4")
 
 # What `system-ui` resolves to across the desktops this runs on, best first.
 _FAMILIES = ("Ubuntu Sans", "Cantarell", "Inter", "Segoe UI", "Noto Sans")
+
+ASSETS = Path(__file__).parent / "assets"
+ICON_SIZES = (256, 128, 64, 48, 32, 16)
 
 BODY_SIZE = 15
 SMALL_SIZE = 12
@@ -77,6 +82,16 @@ def match_font_dpi(root) -> None:
         root.tk.call("tk", "scaling", dpi / 72)
 
 
+def set_window_icon(window) -> None:
+    """Give *window* (and its dialogs) the app icon, at every size we ship."""
+    images = [
+        tk.PhotoImage(master=window, file=str(ASSETS / f"icon-{size}.png"))
+        for size in ICON_SIZES
+    ]
+    window.iconphoto(True, *images)
+    window._icon_images = images  # tk drops images that Python lets go of
+
+
 @cache
 def _family() -> str:
     available = set(tkinter.font.families())
@@ -112,6 +127,9 @@ class Pill(ctk.CTkButton):
     there to do next (Record, then Accept).
 
     ``accent=True`` swaps the neutral colour for the recording red.
+    ``danger=True`` stays muted at rest but turns red on hover, for actions
+    that throw something away.
+    ``width_text`` sizes the pill for a label it will change to later.
     """
 
     def __init__(
@@ -122,9 +140,15 @@ class Pill(ctk.CTkButton):
         variant: str = "outline",
         accent: bool = False,
         large: bool = False,
+        danger: bool = False,
+        width_text: str | None = None,
     ) -> None:
         self._accent = accent
+        self._danger = danger
         large = large or variant == "filled"
+        # A full-size outline button is a real control, not a hint: full-strength
+        # text, so it doesn't read as disabled beside a filled one.
+        self._strong = large and variant == "outline"
         pill_font = font(PRIMARY_SIZE, "bold" if variant == "filled" else "normal")
         if not large:
             pill_font = font(SMALL_SIZE)
@@ -151,7 +175,8 @@ class Pill(ctk.CTkButton):
             master,
             text=text,
             command=command,
-            width=pill_font.measure(text) + (44 if large else 26),
+            width=pill_font.measure(max(text, width_text or "", key=len))
+            + (44 if large else 26),
             height=height,
             corner_radius=height // 2,
             border_spacing=4,
@@ -166,7 +191,9 @@ class Pill(ctk.CTkButton):
             self.bind("<Leave>", self._hover_off)
 
     def _rest_text(self) -> tuple[str, str]:
-        return ERROR if self._accent else MUTED
+        if self._accent:
+            return ERROR
+        return FG if self._strong else MUTED
 
     def _rest_border(self) -> tuple[str, str]:
         return ERROR if self._accent else BORDER
@@ -174,9 +201,10 @@ class Pill(ctk.CTkButton):
     def _hover_on(self, _event=None) -> None:
         if self.cget("state") == "disabled":
             return
+        hot = self._accent or self._danger
         self.configure(
-            text_color=ERROR if self._accent else FG,
-            border_color=ERROR if self._accent else MUTED,
+            text_color=ERROR if hot else FG,
+            border_color=ERROR if hot else MUTED,
         )
 
     def _hover_off(self, _event=None) -> None:
