@@ -1,4 +1,5 @@
 """Unit tests for MainWindow copy and clear actions."""
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -57,3 +58,24 @@ class TestCopyAndClear:
         window._append_text("")
         content = window._output.get("1.0", "end-1c")
         assert content == "existing"
+
+
+def _click(button):
+    """Deliver the events a real mouse click produces on a CTkButton."""
+    button.update()
+    canvas = button._canvas
+    canvas.event_generate("<Enter>")
+    canvas.event_generate("<Button-1>")
+    canvas.event_generate("<ButtonRelease-1>")
+    button.update()
+
+
+class TestButtonsRespondToClicks:
+    def test_clicking_record_starts_recording(self, window):
+        _click(window._record_btn)
+        window._recorder.start.assert_called_once()
+
+    def test_clicking_discard_while_recording_discards(self, window):
+        _click(window._record_btn)
+        _click(window._discard_btn)
+        window._recorder.discard.assert_called_once()

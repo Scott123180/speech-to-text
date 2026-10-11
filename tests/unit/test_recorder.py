@@ -1,4 +1,5 @@
 """Unit tests for AudioRecorder. Write FIRST — must FAIL before implementation."""
+
 import numpy as np
 import pytest
 
@@ -51,6 +52,7 @@ class TestAudioRecorder:
         audio.to_wav_file(path)
 
         import os
+
         assert os.path.exists(path)
 
     def test_discard_stops_and_clears(self):
@@ -73,3 +75,49 @@ class TestAudioRecorder:
 
         recorder = AudioRecorder()
         recorder.discard()  # Must not raise
+
+
+class TestRecorderLevel:
+    """The live input level that drives the main window's meter."""
+
+    def _started(self):
+        from unittest.mock import MagicMock, patch
+
+        from src.audio.recorder import AudioRecorder
+
+        recorder = AudioRecorder()
+        with patch("sounddevice.InputStream", return_value=MagicMock()):
+            recorder.start()
+        return recorder
+
+    def test_level_is_zero_before_recording(self):
+        from src.audio.recorder import AudioRecorder
+
+        assert AudioRecorder().level == 0.0
+
+    def test_level_is_rms_of_latest_block(self):
+        recorder = self._started()
+        recorder._callback(np.full((256, 1), 0.5, dtype=np.float32), 256, None, None)
+
+        assert recorder.level == pytest.approx(0.5)
+
+    def test_level_tracks_only_the_latest_block(self):
+        recorder = self._started()
+        recorder._callback(np.full((256, 1), 0.5, dtype=np.float32), 256, None, None)
+        recorder._callback(np.zeros((256, 1), dtype=np.float32), 256, None, None)
+
+        assert recorder.level == 0.0
+
+    def test_level_resets_on_stop(self):
+        recorder = self._started()
+        recorder._callback(np.full((256, 1), 0.5, dtype=np.float32), 256, None, None)
+        recorder.stop()
+
+        assert recorder.level == 0.0
+
+    def test_level_resets_on_discard(self):
+        recorder = self._started()
+        recorder._callback(np.full((256, 1), 0.5, dtype=np.float32), 256, None, None)
+        recorder.discard()
+
+        assert recorder.level == 0.0

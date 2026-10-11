@@ -33,3 +33,26 @@ class TestTranscriptionPipeline:
 
         import os
         assert os.path.exists(wav_path)  # Caller is responsible for cleanup
+
+
+class TestRecordedWavDecodes:
+    def test_faster_whisper_can_decode_our_wav(self, tmp_path):
+        """The WAV we hand to faster-whisper must survive its real decoder.
+
+        The pipeline test above mocks the model, which hid a PyAV upgrade that
+        broke faster-whisper's av.open() call on every transcription.
+        """
+        from faster_whisper.audio import decode_audio
+
+        from src.audio.recorder import AudioData
+
+        audio = AudioData(
+            frames=[np.full((16000, 1), 0.1, dtype=np.float32)],
+            sample_rate=16000,
+        )
+        wav_path = str(tmp_path / "clip.wav")
+        audio.to_wav_file(wav_path)
+
+        samples = decode_audio(wav_path, sampling_rate=16000)
+
+        assert len(samples) == 16000
