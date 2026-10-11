@@ -41,6 +41,7 @@ import customtkinter as ctk  # noqa: E402
 from src.audio.recorder import AudioRecorder  # noqa: E402
 from src.config.settings import SettingsStore  # noqa: E402
 from src.transcription.engine import TranscriptionEngine  # noqa: E402
+from src.ui import theme  # noqa: E402
 from src.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -51,8 +52,10 @@ def main() -> None:
     settings_store = SettingsStore()
     settings = settings_store.load()
 
-    ctk.set_widget_scaling(settings.ui_scale)
-    ctk.set_window_scaling(settings.ui_scale)
+    # The desktop's own scale (200% on HiDPI), then the user's preference on top.
+    scale = theme.display_scale() * settings.ui_scale
+    ctk.set_widget_scaling(scale)
+    ctk.set_window_scaling(scale)
 
     recorder = AudioRecorder()
     engine = TranscriptionEngine(settings.model_id)

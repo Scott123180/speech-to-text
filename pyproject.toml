@@ -11,6 +11,9 @@ dependencies = [
     "sounddevice>=0.4",
     "scipy>=1.11",
     "faster-whisper>=1.0",
+    # PyAV 19 dropped av.open(metadata_errors=...), which faster-whisper 1.2.1
+    # passes when decoding audio. Lift once faster-whisper catches up.
+    "av<19",
     "platformdirs>=4.0",
 ]
 

@@ -32,6 +32,12 @@ class AudioRecorder:
         self._frames: list = []
         self._stream: sd.InputStream | None = None
         self._recording: bool = False
+        self._level: float = 0.0
+
+    @property
+    def level(self) -> float:
+        """RMS amplitude of the most recent audio block; 0.0 when not recording."""
+        return self._level
 
     def start(self) -> None:
         """Open an audio stream from the default microphone."""
@@ -52,6 +58,7 @@ class AudioRecorder:
 
     def _callback(self, indata: np.ndarray, frames: int, time, status) -> None:
         self._frames.append(indata.copy())
+        self._level = float(np.sqrt(np.mean(np.square(indata))))
 
     def stop(self) -> AudioData:
         """Stop recording and return the captured audio."""
@@ -61,6 +68,7 @@ class AudioRecorder:
         self._stream.close()
         self._stream = None
         self._recording = False
+        self._level = 0.0
         return AudioData(list(self._frames), SAMPLE_RATE)
 
     def discard(self) -> None:
@@ -71,3 +79,4 @@ class AudioRecorder:
             self._stream = None
         self._frames = []
         self._recording = False
+        self._level = 0.0
