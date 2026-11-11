@@ -52,6 +52,7 @@ class MainWindow(ctk.CTk):
         self._animating = False
         self._cleared_text: str | None = None
         self._notice_timer: str | None = None
+        self._painted_size: tuple[int, int] | None = None
 
         self.title("Speech to Text")
         self.geometry("640x520")
@@ -60,6 +61,7 @@ class MainWindow(ctk.CTk):
 
         self._build_ui()
         self._apply_state(AppState.IDLE)
+        self.bind("<Configure>", self._on_configure, add="+")
 
     # ── UI construction ──────────────────────────────────────────────────────
 
@@ -68,11 +70,11 @@ class MainWindow(ctk.CTk):
         self.grid_rowconfigure(1, weight=1)
 
         # Clear lives up here, by the text it destroys and far from Copy.
-        topbar = ctk.CTkFrame(self, fg_color="transparent", height=30)
-        topbar.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 0))
-        topbar.pack_propagate(False)
+        self._topbar = ctk.CTkFrame(self, fg_color="transparent", height=30)
+        self._topbar.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 0))
+        self._topbar.pack_propagate(False)
         self._clear_btn = Pill(
-            topbar, "Clear", self._on_clear, variant="link", danger=True
+            self._topbar, "Clear", self._on_clear, variant="link", danger=True
         )
 
         # The writing surface fills the window, borderless, like waypoint's box.
@@ -109,7 +111,7 @@ class MainWindow(ctk.CTk):
         self._sync_text_state()
 
     def _build_footer(self) -> None:
-        footer = ctk.CTkFrame(self, fg_color="transparent")
+        self._footer = footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.grid(row=2, column=0, sticky="ew", padx=18, pady=(8, 12))
 
         # Left slot: what's doing the transcribing (and where to change it) when
@@ -204,6 +206,38 @@ class MainWindow(ctk.CTk):
         )
         self._notice_actions = ctk.CTkFrame(self._notice, fg_color="transparent")
         self._notice_actions.grid(row=1, column=1, padx=(0, 18), pady=8)
+
+    # ── Resize repaint ───────────────────────────────────────────────────────
+
+    def _on_configure(self, event) -> None:
+        # The toplevel's bindings also fire for every child; only its own count.
+        if event.widget is not self:
+            return
+        size = (event.width, event.height)
+        if size == self._painted_size:
+            return
+        self._painted_size = size
+        self.after_idle(self._repaint_rows)
+
+    def _repaint_rows(self) -> None:
+        """Re-map the rows around the text so they're painted at their new spot.
+
+        Under XWayland, a big resize (snapping to half of a tall monitor) moves
+        the footer down but what Tk paints there never reaches the screen, so
+        Record and Copy vanished. Unmapping and re-mapping a row makes X send
+        a fresh Expose, and that paint sticks. The text area repaints fine on
+        its own and is left alone so the transcript doesn't flash.
+        """
+        rows = [
+            row
+            for row in (self._topbar, self._footer, self._notice)
+            if row.winfo_manager()
+        ]
+        for row in rows:
+            row.grid_remove()
+        self.update_idletasks()
+        for row in rows:
+            row.grid()
 
     # ── Notice ───────────────────────────────────────────────────────────────
 
