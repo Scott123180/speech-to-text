@@ -124,3 +124,58 @@ class TestUndoClear:
         window._on_clear()
         window.update()
         assert not window._notice.winfo_ismapped()
+
+
+def _resize(window, geometry):
+    """Resize the way a window manager's snap does, then let Tk settle."""
+    window.update()
+    window.geometry(geometry)
+    window.update()
+    window.update()
+
+
+def _count_maps(widget):
+    """Record each time *widget* is mapped from now on (after the first show)."""
+    widget.update()
+    maps = []
+    widget.bind("<Map>", lambda _e: maps.append(1), add="+")
+    return maps
+
+
+class TestResizeRepaint:
+    """XWayland drops what Tk paints into the rows a big resize moves, which
+    left the footer (Record and all) blank when snapped to half a tall screen.
+    Re-mapping the rows after a resize makes X expose them, so they repaint."""
+
+    def test_resize_remaps_footer(self, window):
+        maps = _count_maps(window._footer)
+        _resize(window, "700x900")
+        assert maps
+
+    def test_resize_remaps_topbar(self, window):
+        maps = _count_maps(window._topbar)
+        _resize(window, "700x900")
+        assert maps
+
+    def test_resize_leaves_text_area_alone(self, window):
+        # Re-mapping the text would flash the transcript; it repaints fine.
+        maps = _count_maps(window._output)
+        _resize(window, "700x900")
+        assert not maps
+
+    def test_footer_keeps_its_place_after_resize(self, window):
+        before = window._footer.grid_info()
+        _resize(window, "700x900")
+        assert window._footer.grid_info() == before
+
+    def test_resize_keeps_hidden_notice_hidden(self, window):
+        _resize(window, "700x900")
+        assert not window._notice.winfo_ismapped()
+
+    def test_moving_without_resizing_does_not_remap(self, window):
+        window.update()
+        maps = _count_maps(window._footer)
+        window.geometry(f"+{window.winfo_x() + 10}+{window.winfo_y()}")
+        window.update()
+        window.update()
+        assert not maps
